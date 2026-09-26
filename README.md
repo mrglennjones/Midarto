@@ -144,6 +144,21 @@ For MIDI outputs, Midarto sets each channel's volume (CC7) from the file's own v
 - `docs/midarto-guide.pdf`: the full user guide ([download](https://github.com/mrglennjones/midarto/raw/main/docs/midarto-guide.pdf)).
 - `docs/images/`: screen, grid and splash images.
 - `CHANGELOG.md`: what changed in each version.
+- `LICENSE`: the MIT License.
+
+## Thanks
+
+- [monome](https://monome.org) (brian crabtree and the norns contributors) for norns, maiden and the grid.
+- [sixolet](https://github.com/sixolet) for [nb](https://github.com/sixolet/nb) (nota bene), which Midarto can play through.
+- [sonoCircuit](https://github.com/sonocircuit) for [midiplayer](https://norns.community/midiplayer/), which showed MIDI file playback on norns and inspired Midarto.
+- [adamstaff](https://github.com/adamstaff) for [turntable](https://norns.community/turntable), whose norns DJ controls inspired Midarto's keys and knobs.
+- denki oto for the norns Shield XL and the grid clone that Midarto was developed and tested on.
+
+The guide uses IBM Plex Mono and the mockup images use Silkscreen, both under the SIL Open Font License.
+
+## Licence
+
+Midarto is released under the [MIT License](LICENSE). You're free to use, change and share it, as long as the copyright notice stays with it.
 
 ## Credits
 
