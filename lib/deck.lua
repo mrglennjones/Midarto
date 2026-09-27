@@ -42,6 +42,7 @@ function Deck:clear()
   self.trans = 0
   self.sync = false
   self.pending = nil
+  self.armed = nil   -- waiting to start on the other deck's next bar
   self.held = {}
   self.prog = {}
   self.init_prog = {}
@@ -88,6 +89,28 @@ function Deck:load(path, yield_fn)
   end
   self:seek(0, false)
   return true
+end
+
+-- where the music starts: the start of the bar holding the first note
+-- (mode "note") or the first drum hit on channel 10 (mode "drum",
+-- falling back to the first note if there are no drums)
+function Deck:first_bar_sec(mode)
+  local song = self.song
+  if not song then return 0 end
+  local first, first_drum
+  for k = 1, song.n do
+    local e = song.events[k]
+    if e.st - e.st % 16 == 0x90 and e.b > 0 then
+      first = first or e
+      if e.st % 16 == 9 then first_drum = e; break end
+      if mode ~= "drum" then break end
+    end
+  end
+  local e = (mode == "drum" and first_drum) or first
+  if not e then return 0 end
+  local bb = song.bar_beats
+  local bar_beat = math.floor(e.t / song.div / bb + 1e-6) * bb
+  return smf.sec_at_tick(song, bar_beat * song.div)
 end
 
 -- ---------- timing helpers ----------
@@ -331,6 +354,7 @@ end
 
 function Deck:toggle_play()
   if not self.song then return end
+  self.armed = nil
   if self.playing then
     self.playing = false
     self.pending = nil
@@ -343,6 +367,7 @@ end
 
 function Deck:stop()
   if not self.song then return end
+  self.armed = nil
   self.playing = false
   self.pending = nil
   self.loop = nil
@@ -362,6 +387,7 @@ end
 function Deck:cue_return(key)
   if not self.song then return end
   local target = self.cues[1] or 0
+  self.armed = nil
   if self.playing then
     self:jump(target, key)
   else
