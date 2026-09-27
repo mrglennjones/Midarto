@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.12
+- Pressing LOAD (or K1+K2/K3) again closes the file browser, in case it was opened by accident.
+
+## 2.11
+- Loading a song no longer makes the playing deck glitch. Files are now read in small slices (the tracks are merged step by step instead of in one big sort), so the norns is never busy for more than a few milliseconds at a time.
+
+## 2.10
+- CUE while playing jumps to the main cue and keeps playing (on the next bar when quantize jumps is on). CUE while paused still moves there and stays paused.
+
 ## 2.9
 - Shared channels: the playing deck owns any channel both decks use on the same device. Loading, cueing or stopping the other deck no longer touches it, and when both play the louder deck owns it while the quieter deck's notes are scaled by velocity.
 - Channels a file never gives an instrument now get piano (the General MIDI default).

@@ -4,7 +4,7 @@
 
 A two-deck MIDI file DJ for monome norns. Load `.mid` files into deck A and deck B, mix them with a crossfader and play them out to a MIDI sound module (such as a General MIDI module) or to nb voices. It works on the norns alone, and a 16×8 grid adds cues, loops, mutes, sync and big transport keys.
 
-Version 2.9.
+Version 2.12.
 
 ## Install
 
@@ -107,9 +107,9 @@ Deck keys:
   - **SHIFT + CHAN** solos that channel. SHIFT + more channels adds them to the solo.
   - **SHIFT + a soloed channel** restores all channels (clears solos and mutes).
   - A channel the file doesn't use stays dark. Muted or solo-silenced channels are dim, playing channels are medium, soloed channels are bright, and every channel flickers brighter each time it plays a note.
-- **CUE** returns to hot cue 1 (or the start) and pauses. **SHIFT + CUE** stops the deck and returns to the start.
+- **CUE** goes to hot cue 1 (or the start). While the deck is playing it jumps there and keeps playing, on the next bar when quantize jumps is on; while paused it moves there and stays paused. **SHIFT + CUE** stops the deck and returns to the start.
 - **PLAY/PAUSE** starts or pauses the deck and pulses on each beat.
-- **LOAD** opens the browser for that deck. **SHIFT** is shared by both decks; there's one next to the mixer on each side.
+- **LOAD** opens the browser for that deck; press it again to close the browser without loading anything. **SHIFT** is shared by both decks; there's one next to the mixer on each side.
 - **free** keys do nothing yet.
 
 Mixer:

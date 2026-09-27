@@ -1,6 +1,6 @@
 -- midarto
 -- two-deck MIDI file DJ
--- v2.9
+-- v2.12
 --
 -- E1 crossfader
 -- E2/E3 deck A/B volume
@@ -238,7 +238,19 @@ local function scan(dir)
   browse.sel = clamp(browse.sel, 1, math.max(1, #list))
 end
 
-local function open_browser(id)
+local open_browser
+
+-- LOAD (or K1+K2/K3): opens the browser for that deck; pressed again
+-- while its browser is open, it closes it again
+local function toggle_browser(id)
+  if mode == "browse" and browse.target == id then
+    mode = "decks"
+  else
+    open_browser(id)
+  end
+end
+
+function open_browser(id)
   browse.target = id
   if not util.file_exists(browse.dir) then browse.dir = SONGS_DIR end
   scan(browse.dir)
@@ -299,11 +311,13 @@ function key(n, z)
   if z == 1 and skip_splash() then return end
   if z == 0 then return end
   if mode == "browse" then
-    if n == 2 then mode = "decks" else browse_enter() end
+    if k1 then toggle_browser((n == 2) and "a" or "b")
+    elseif n == 2 then mode = "decks"
+    else browse_enter() end
     return
   end
   local id = (n == 2) and "a" or "b"
-  if k1 then open_browser(id) else decks[id]:toggle_play() end
+  if k1 then toggle_browser(id) else decks[id]:toggle_play() end
 end
 
 function enc(n, delta)
@@ -331,7 +345,7 @@ end
 
 -- ---------- grid ----------
 
--- v2.9 layout. rows 1-3 and 5-6 run in the same order on both decks.
+-- v2.10 layout. rows 1-3 and 5-6 run in the same order on both decks.
 -- row 4 (tempo) and rows 7-8 are mirrored, so NDG, CUE, PLAY and
 -- SYNC sit on the outer edges; -/+ pairs still read left to right.
 local ROWS = {
@@ -375,7 +389,7 @@ local function deck_key(d, id, c, y, z)
     if kind == "nudge" then d.nudge = 0 end
     return
   end
-  if kind == "load" then open_browser(id); return end
+  if kind == "load" then toggle_browser(id); return end
   if kind == "free" or not d.song then return end
   local bb = d:bar_beats()
   local shift = shifted()
@@ -407,7 +421,7 @@ local function deck_key(d, id, c, y, z)
   elseif kind == "ch" then
     if shift then d:solo_chan(v) else d:toggle_chan(v) end
   elseif kind == "cue" then
-    if shift then d:stop() else d:cue_return() end
+    if shift then d:stop() else d:cue_return(fk) end
     flash(fk)
   elseif kind == "play" then
     d:toggle_play()
