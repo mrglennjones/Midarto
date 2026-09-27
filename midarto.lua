@@ -1,6 +1,6 @@
 -- midarto
 -- two-deck MIDI file DJ
--- v2.12
+-- v2.13
 --
 -- E1 crossfader
 -- E2/E3 deck A/B volume
@@ -242,6 +242,54 @@ local open_browser
 
 -- LOAD (or K1+K2/K3): opens the browser for that deck; pressed again
 -- while its browser is open, it closes it again
+-- PLAY. with "start on bar" on, a stopped deck waits (armed, PLAY
+-- blinking) for the other deck's next bar line while that deck plays;
+-- pressing PLAY again cancels. with "on + sync" it also syncs tempo.
+local function press_play(id)
+  local d, o = decks[id], other(id)
+  if not d.song then return end
+  if d.armed then d.armed = nil; return end
+  if d.playing then d:toggle_play(); return end
+  local mode = params:string("midarto_barstart")
+  if mode ~= "off" and o.song and o.playing then
+    if mode == "on + sync" and not d.sync then
+      d:match_tempo(o)
+      d.sync = true
+      master = o.id -- the deck already playing leads
+    end
+    if d.pos >= d.song.len then d:seek(0, true) end
+    local obb = o:bar_beats()
+    d.armed = { bar = math.floor(o:beat() / obb + 1e-6) }
+  else
+    d:toggle_play()
+  end
+end
+
+-- start armed decks as the other deck crosses a bar line (also when
+-- it loops back), catching up by however far past the line it is
+local function check_armed()
+  for _, id in ipairs(ids) do
+    local d, o = decks[id], other(id)
+    if d.armed then
+      if not (o.song and o.playing) then
+        d.armed = nil
+        d.playing = true
+      else
+        local obb = o:bar_beats()
+        local ob = o:beat()
+        local bar = math.floor(ob / obb + 1e-6)
+        if bar ~= d.armed.bar then
+          d.armed = nil
+          local over_beats = ob - bar * obb
+          local over_sec = over_beats * 60 / o:bpm()
+          d.playing = true
+          d:update(math.max(0, over_sec)) -- catch up the few ms since the line
+        end
+      end
+    end
+  end
+end
+
 local function toggle_browser(id)
   if mode == "browse" and browse.target == id then
     mode = "decks"
@@ -271,7 +319,16 @@ local function load_into(id, path)
       d.quantize = params:string("midarto_quantize") == "on"
       d:chase(true)   -- work out the song's starting setup
       route_update()  -- decide who owns each channel
-      d:chase()       -- then set up the channels this deck owns
+      local fc = params:string("midarto_firstcue")
+      if fc ~= "off" then
+        -- skip any silence at the start: cue 1 and the deck go to the
+        -- start of the bar where the music begins
+        local sec = d:first_bar_sec(fc == "first drum" and "drum" or "note")
+        if sec > 0 then d.cues[1] = sec end
+        d:seek(sec, true)
+      else
+        d:chase()     -- then set up the channels this deck owns
+      end
       notify(id:upper() .. " < " .. d.name)
     else
       d:clear()
@@ -317,7 +374,7 @@ function key(n, z)
     return
   end
   local id = (n == 2) and "a" or "b"
-  if k1 then toggle_browser(id) else decks[id]:toggle_play() end
+  if k1 then toggle_browser(id) else press_play(id) end
 end
 
 function enc(n, delta)
@@ -424,7 +481,7 @@ local function deck_key(d, id, c, y, z)
     if shift then d:stop() else d:cue_return(fk) end
     flash(fk)
   elseif kind == "play" then
-    d:toggle_play()
+    press_play(id)
   end
 end
 
@@ -468,6 +525,7 @@ local function deck_led(d, id, c, y)
   elseif kind == "cue" then
     return d.cues[1] and 8 or 3
   elseif kind == "play" then
+    if d.armed then return (frame % 4 < 2) and 15 or 3 end
     if d.playing then return ((d:beat() % 1) < 0.2) and 15 or 8 end
     return 3
   end
@@ -680,8 +738,10 @@ local function draw_deck_text(d, side)
   -- play state
   local gx = side == "a" and 35 or 89
   screen.level(15)
-  if d.playing then
+  if d.playing or (d.armed and frame % 4 < 2) then
     screen.move(gx, 58); screen.line(gx, 63); screen.line(gx + 4, 60.5); screen.close(); screen.fill()
+  elseif d.armed then
+    -- blink: nothing drawn on the off frames
   else
     screen.rect(gx, 59, 1, 4); screen.fill()
     screen.rect(gx + 3, 59, 1, 4); screen.fill()
@@ -873,6 +933,7 @@ local function engine()
       if d.sync and id ~= master then d:match_tempo(other(id)) end
       d:update(dt)
     end
+    check_armed()
     vol_t = vol_t + dt
     if vol_t >= 0.03 then
       vol_t = 0
@@ -948,6 +1009,8 @@ local function add_params()
   end
   params:add_separator("midarto_mix", "mix")
   params:add_option("midarto_xfcurve", "crossfader curve", { "dj", "smooth" }, 1)
+  params:add_option("midarto_firstcue", "cue to first note", { "off", "first note", "first drum" }, 2)
+  params:add_option("midarto_barstart", "start on bar", { "off", "on", "on + sync" }, 3)
   params:add_option("midarto_quantize", "quantize jumps", { "on", "off" }, 1)
   params:set_action("midarto_quantize", function(v)
     for _, id in ipairs(ids) do decks[id].quantize = (v == 1) end

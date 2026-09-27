@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.13
+- Cue to first note (on by default): loading a song sets hot cue 1 and the deck to the start of the bar where the music begins, skipping silence at the start. Can use the first drum hit instead, or be turned off.
+- Start on bar (on + sync by default): PLAY on a stopped deck while the other deck plays arms it; it starts exactly on the other deck's next bar line and syncs its tempo. PLAY again cancels.
+
 ## 2.12
 - Pressing LOAD (or K1+K2/K3) again closes the file browser, in case it was opened by accident.
 

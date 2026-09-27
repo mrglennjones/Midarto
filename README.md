@@ -4,7 +4,7 @@
 
 A two-deck MIDI file DJ for monome norns. Load `.mid` files into deck A and deck B, mix them with a crossfader and play them out to a MIDI sound module (such as a General MIDI module) or to nb voices. It works on the norns alone, and a 16×8 grid adds cues, loops, mutes, sync and big transport keys.
 
-Version 2.12.
+Version 2.13.
 
 ## Install
 
@@ -43,6 +43,8 @@ Open PARAMS > EDIT > MIDARTO. Midarto remembers these settings between sessions 
 | drums stay on 10 | Keeps channel 10 drums on 10 when shifting; other channels skip 10 |
 | nb voice | Voice for the deck when output is `nb voice` |
 | crossfader curve | `dj` (both full at the centre) or `smooth` (constant power) |
+| cue to first note | `first note` (default), `first drum` or `off`. On load, hot cue 1 and the deck go to the start of the bar where the music begins, skipping silence at the start |
+| start on bar | `on + sync` (default), `on` or `off`. PLAY on a stopped deck waits for the other deck's next bar line while it plays; `on + sync` also locks the tempo |
 | quantize jumps | Seek, cue and bar jumps wait for the next bar line |
 | knob sensitivity | How far the faders move per encoder step |
 | end warning | How long before the end of a song its platter outline starts flashing: off, 10, 20, 30 (default) or 60 seconds |
@@ -108,7 +110,7 @@ Deck keys:
   - **SHIFT + a soloed channel** restores all channels (clears solos and mutes).
   - A channel the file doesn't use stays dark. Muted or solo-silenced channels are dim, playing channels are medium, soloed channels are bright, and every channel flickers brighter each time it plays a note.
 - **CUE** goes to hot cue 1 (or the start). While the deck is playing it jumps there and keeps playing, on the next bar when quantize jumps is on; while paused it moves there and stays paused. **SHIFT + CUE** stops the deck and returns to the start.
-- **PLAY/PAUSE** starts or pauses the deck and pulses on each beat.
+- **PLAY/PAUSE** starts or pauses the deck and pulses on each beat. With "start on bar" on and the other deck playing, PLAY arms the deck instead: the key blinks and the deck starts exactly on the other deck's next bar line (synced, with `on + sync`). Press PLAY again to cancel.
 - **LOAD** opens the browser for that deck; press it again to close the browser without loading anything. **SHIFT** is shared by both decks; there's one next to the mixer on each side.
 - **free** keys do nothing yet.
 
@@ -168,3 +170,4 @@ Created by Glenn Jones, Cutie Suzuki & DJ FingaBlasta.
 - Social: @mrglennjones
 - GitHub: [github.com/mrglennjones](https://github.com/mrglennjones)
 - Project: [github.com/mrglennjones/midarto](https://github.com/mrglennjones/midarto)
+- Discussion: [lines forum thread](https://llllllll.co/t/midarto/75532)
