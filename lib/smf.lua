@@ -48,7 +48,8 @@ function smf.parse(data, yield_fn)
   end
   if div <= 0 then return nil, "bad time division" end
 
-  local events, count = {}, 0
+  local tracks = {}  -- one time-ordered list per track, merged below
+  local count = 0
   local tempos = {}
   local timesig = nil
   local maxtick = 0
@@ -63,6 +64,8 @@ function smf.parse(data, yield_fn)
     pos = i + len
     if id == "MTrk" then
       local tick, running = 0, nil
+      local tev = {}
+      tracks[#tracks + 1] = tev
       local ok, err = pcall(function()
         while i < stop do
           local delta
@@ -104,9 +107,9 @@ function smf.parse(data, yield_fn)
             end
             if a == nil then break end
             count = count + 1
-            events[count] = { t = tick, st = st, a = a, b = b or 0, n = count }
+            tev[#tev + 1] = { t = tick, st = st, a = a, b = b or 0 }
             if tick > maxtick then maxtick = tick end
-            if yield_fn and count % 2000 == 0 then yield_fn() end
+            if yield_fn and count % 256 == 0 then yield_fn() end
           end
         end
       end)
@@ -116,13 +119,27 @@ function smf.parse(data, yield_fn)
 
   if count == 0 then return nil, "no notes found" end
 
-  table.sort(events, function(x, y)
-    if x.t ~= y.t then return x.t < y.t end
-    local px, py = prio(x), prio(y)
-    if px ~= py then return px < py end
-    return x.n < y.n
-  end)
-  if yield_fn then yield_fn() end
+  -- merge the tracks (each already in time order) a slice at a time,
+  -- instead of one big sort, so a playing deck never has to wait long.
+  -- on the same tick, note-offs go before other events and note-ons
+  -- last; within one track the file's own order is kept.
+  local events = {}
+  local heads = {}
+  for i = 1, #tracks do heads[i] = 1 end
+  for k = 1, count do
+    local best, bt, bp
+    for i = 1, #tracks do
+      local e = tracks[i][heads[i]]
+      if e then
+        local ep = prio(e)
+        if not best or e.t < bt or (e.t == bt and ep < bp) then best, bt, bp = i, e.t, ep end
+      end
+    end
+    events[k] = tracks[best][heads[best]]
+    heads[best] = heads[best] + 1
+    if yield_fn and k % 512 == 0 then yield_fn() end
+  end
+  tracks = nil
 
   -- tempo map: segments of constant tempo
   table.sort(tempos, function(x, y) return x.tick < y.tick end)
@@ -150,6 +167,7 @@ function smf.parse(data, yield_fn)
     while si < #segs and segs[si + 1].tick <= e.t do si = si + 1 end
     local sg = segs[si]
     e.s = sg.sec + (e.t - sg.tick) * sg.uspq / 1e6 / div
+    if yield_fn and k % 2048 == 0 then yield_fn() end
   end
   song.len = smf.sec_at_tick(song, maxtick)
   if song.len <= 0 then song.len = events[count].s + 0.5 end

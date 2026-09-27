@@ -84,6 +84,7 @@ function Deck:load(path, yield_fn)
     local ch = e.st % 16 + 1
     if hi == 0xC0 and self.init_prog[ch] == nil then self.init_prog[ch] = e.a end
     if hi == 0x90 then self.used[ch] = true end
+    if yield_fn and k % 4096 == 0 then yield_fn() end
   end
   self:seek(0, false)
   return true
@@ -355,12 +356,18 @@ function Deck:restart()
   self.playing = true
 end
 
--- return to the main cue (hot cue 1, else the start) and pause
-function Deck:cue_return()
+-- CUE: go to the main cue (hot cue 1, else the start). while playing
+-- it jumps there and keeps playing (on the next bar when quantize is
+-- on); while paused it moves there and stays paused.
+function Deck:cue_return(key)
   if not self.song then return end
-  self.playing = false
-  self.pending = nil
-  self:seek(self.cues[1] or 0, true)
+  local target = self.cues[1] or 0
+  if self.playing then
+    self:jump(target, key)
+  else
+    self.pending = nil
+    self:seek(target, true)
+  end
 end
 
 function Deck:set_loop(bars)
