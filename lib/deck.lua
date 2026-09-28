@@ -43,6 +43,10 @@ function Deck:clear()
   self.sync = false
   self.pending = nil
   self.armed = nil   -- waiting to start on the other deck's next bar
+  self.wave = nil    -- waveform data (see lib/wave), set by the script
+  self.wmix = nil    -- the waveform mixed for the channels you can hear
+  self.mute_version = (self.mute_version or 0) + 1
+  self.lib_dirty = false
   self.held = {}
   self.prog = {}
   self.init_prog = {}
@@ -69,7 +73,11 @@ function Deck:load(path, yield_fn)
   f:close()
   local song, err = smf.parse(data, yield_fn)
   if not song then return false, err end
+  return self:set_song(song, path, yield_fn)
+end
 
+-- take a prepared song (parsed now, or read from the song library)
+function Deck:set_song(song, path, yield_fn)
   self:stop_notes()
   local vol, quantize = self.vol, self.quantize
   self:clear()
@@ -404,6 +412,7 @@ function Deck:set_loop(bars)
   local stop = math.min(self.song.len, self:sec_at_beat(start_beat + bars * bb))
   if stop - start < 0.05 then return end
   self.loop = { bars = bars, start = start, stop = stop }
+  if self.last_loop ~= bars then self.lib_dirty = true end
   self.last_loop = bars
 end
 
@@ -424,6 +433,7 @@ end
 function Deck:toggle_chan(ch)
   if not self.used[ch] then return end
   self.chmute[ch] = not self.chmute[ch]
+  self.mute_version = self.mute_version + 1
   self:release_where(function(c) return self:muted(c) end)
 end
 
@@ -437,6 +447,7 @@ function Deck:solo_chan(ch)
   else
     self.solo[ch] = true
   end
+  self.mute_version = self.mute_version + 1
   self:release_where(function(c) return self:muted(c) end)
 end
 
