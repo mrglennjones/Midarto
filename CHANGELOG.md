@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.15
+- Keep screen awake (while playing by default): stops the norns blanking its screen after 15 minutes without a key or knob press, for example while playing from the grid.
+- "MIDARTO" scrolls across the grid during the splash screen.
+- The MIDARTO brand lettering is used on the splash screen, the platter screen's status line and the grid scroller.
+
 ## 2.14
 - Waveform view (screen view setting): both decks' MIDI activity scrolls past a fixed playhead, with kicks and snares standing out, a song overview with loop, cues and position, hot cue and pending-jump markers, a beat ruler with phrase markers, a beat-phase meter, the crossfader, output levels, and mutes shown in the waveform. Zoom from 2 to 32 seconds in PARAMS.
 - Song library: hot cues and the last loop length are remembered per song, and each song's prepared data and waveform are cached so it loads much faster the second time. "clear song cache" in PARAMS.

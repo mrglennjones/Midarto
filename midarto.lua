@@ -1,6 +1,6 @@
 -- midarto
 -- two-deck MIDI file DJ
--- v2.14
+-- v2.15
 --
 -- E1 crossfader
 -- E2/E3 deck A/B volume
@@ -20,6 +20,7 @@ local smf = include("lib/smf")
 local Wave = include("lib/wave")
 local Library = include("lib/library")
 local DJ_ART = include("lib/splash_art")
+local BRAND = include("lib/brand")
 
 local has_nb, nb = pcall(require, "nb/lib/nb")
 if not has_nb then nb = nil end
@@ -626,8 +627,34 @@ local function mix_led(x, y)
   end
 end
 
+-- "MIDARTO" scrolling across the grid during the splash screen, in the
+-- brand lettering (lib/brand), with the grid's 7 top rows.
+local MARQUEE = {} -- list of columns; each column is a 7-entry table of 0/1
+for c = 1, #BRAND.grid[1] do
+  local col = {}
+  for r = 1, 7 do col[r] = BRAND.grid[r]:sub(c, c) == "#" and 1 or 0 end
+  MARQUEE[#MARQUEE + 1] = col
+end
+
+local function grid_marquee()
+  -- 12 columns a second: in from the right, out to the left, within the splash
+  local t = util.time() - splash_start
+  local offset = math.floor(t * 12)
+  g:all(0)
+  for x = 1, 16 do
+    local col = MARQUEE[x + offset - 16]
+    if col then
+      for r = 1, 7 do
+        if col[r] == 1 then g:led(x, r, 15) end
+      end
+    end
+  end
+  g:refresh()
+end
+
 local function grid_redraw()
   if not g.device then return end
+  if splash_on() then grid_marquee(); return end
   g:all(0)
   for y = 1, 8 do
     for x = 1, 16 do
@@ -642,6 +669,33 @@ local function grid_redraw()
 end
 
 -- ---------- screen ----------
+
+-- the MIDARTO wordmark (lib/brand), pre-split into runs of lit pixels
+local function to_runs(rows)
+  local runs = {}
+  for y, row in ipairs(rows) do
+    local x = 1
+    while x <= #row do
+      if row:sub(x, x) == "#" then
+        local len = 1
+        while row:sub(x + len, x + len) == "#" do len = len + 1 end
+        runs[#runs + 1] = { x - 1, y - 1, len }
+        x = x + len
+      else
+        x = x + 1
+      end
+    end
+  end
+  return runs, #rows[1], #rows
+end
+local BRAND_LARGE, BRAND_LARGE_W = to_runs(BRAND.large)
+local BRAND_SMALL, BRAND_SMALL_W = to_runs(BRAND.small)
+local function draw_brand(runs, x0, y0, level)
+  if level <= 0 then return end
+  screen.level(level)
+  for _, r in ipairs(runs) do screen.rect(x0 + r[1], y0 + r[2], r[3], 1) end
+  screen.fill()
+end
 
 local function trim(s, w)
   while #s > 1 and screen.text_extents(s) > w do s = s:sub(1, -2) end
@@ -820,13 +874,17 @@ local function draw_mixer()
   screen.rect(math.floor(46 + xf * 35 - 1 + 0.5), 52, 3, 7)
   screen.fill()
   -- status
-  local status, lvl = "MIDARTO", 4
+  local status, lvl = nil, 4
   if message and util.time() < message_until then status, lvl = message, 15
   elseif k1 then status, lvl = "SHIFT", 15
   elseif decks.a.sync or decks.b.sync then status = "SYNC" end
-  screen.level(lvl)
-  screen.move(64, 63)
-  screen.text_center(trim(status, 40))
+  if status then
+    screen.level(lvl)
+    screen.move(64, 63)
+    screen.text_center(trim(status, 40))
+  else
+    draw_brand(BRAND_SMALL, 64 - BRAND_SMALL_W // 2, 59, 4)
+  end
 end
 
 local function draw_browser()
@@ -912,11 +970,7 @@ local function draw_splash()
   end
   local cx = 88
   screen.font_face(1)
-  screen.font_size(16)
-  screen.level(math.floor(15 * f_in + 0.5))
-  screen.move(cx, 17)
-  screen.text_center("MIDARTO")
-  screen.font_size(8)
+  draw_brand(BRAND_LARGE, cx - BRAND_LARGE_W // 2, 6, math.floor(15 * f_in + 0.5))
   local tag = f_in * (1 - fade(t, 2.3, 2.5))
   local cred = fade(t, 2.5, 2.8)
   if tag > 0 then
@@ -1251,7 +1305,15 @@ local function ui_loop()
       end
       d.last_tempo = d.tempo
     end
-    if frame % 15 == 0 then autosave(now) end
+    if frame % 15 == 0 then
+      autosave(now)
+      -- keep the norns screen from going to sleep (it blanks after 15
+      -- minutes without a key or knob press) while a deck plays, or always
+      local ka = params:string("midarto_awake")
+      if ka == "always" or (ka == "while playing" and (decks.a.playing or decks.b.playing)) then
+        if screen.ping then screen.ping() end
+      end
+    end
     redraw()
     grid_redraw()
     decks.a.act, decks.b.act = {}, {}
@@ -1317,6 +1379,7 @@ local function add_params()
   params:add_option("midarto_view", "screen view", { "platters", "waveform" }, 1)
   params:add_option("midarto_zoom", "waveform zoom", { "2 s", "4 s", "8 s", "16 s", "32 s" }, 2)
   params:add_option("midarto_frametime", "show frame time", { "off", "on" }, 1)
+  params:add_option("midarto_awake", "keep screen awake", { "while playing", "always", "off" }, 1)
   params:add_number("midarto_settings_ver", "settings version", 0, 99, 1)
   pcall(function() params:hide("midarto_settings_ver") end)
   params:add_separator("midarto_lib", "song library")

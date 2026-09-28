@@ -1,3 +1,5 @@
+![Midarto: MIDI file DJ app for norns](https://raw.githubusercontent.com/mrglennjones/midarto/main/docs/images/logo.png)
+
 # Midarto
 
 ![Midarto on norns and grid](https://raw.githubusercontent.com/mrglennjones/midarto/main/docs/images/mockup.gif)
@@ -6,7 +8,7 @@
 
 A two-deck MIDI file DJ for monome norns. Load `.mid` files into deck A and deck B, mix them with a crossfader and play them out to a MIDI sound module (such as a General MIDI module) or to nb voices. It works on the norns alone, and a 16×8 grid adds cues, loops, mutes, sync and big transport keys.
 
-Version 2.14.
+Version 2.15.
 
 ## Install
 
@@ -18,7 +20,7 @@ Version 2.14.
 2. Copy the whole `midarto` folder into `dust/code/` on your norns. Any of these works:
    - From a computer on the same network, open the norns file share (`smb://norns.local` on macOS or `\\norns.local` on Windows, user `we`, password `sleep` unless you changed it). Drop the folder into `dust/code/`.
    - Or from a terminal: `scp -r midarto we@norns.local:~/dust/code/`
-3. On the norns, go to SELECT and choose MIDARTO. A 5-second splash screen shows an 8-bit DJ at the decks next to the title, then the credits; press any key or knob, or any grid key, to skip it.
+3. On the norns, go to SELECT and choose MIDARTO. A 5-second splash screen shows an 8-bit DJ at the decks next to the title, then the credits, while "MIDARTO" scrolls across the grid; press any key or knob, or any grid key, to skip it.
 
 The first time it runs, Midarto creates a songs folder, `dust/data/midarto/songs/`, and puts two demo songs in it (`acid_trk.mid` at 120 BPM and `breaks.mid` at 98.5 BPM), so you can try it straight away.
 
@@ -55,6 +57,7 @@ Open PARAMS > EDIT > MIDARTO. Midarto saves these settings a couple of seconds a
 | screen view | `platters` (default) or `waveform` |
 | waveform zoom | How much time the waveform shows across the screen: 2, 4 (default), 8, 16 or 32 seconds |
 | show frame time | Shows how long each screen frame takes to draw, for checking the load on your norns |
+| keep screen awake | `while playing` (default), `always` or `off`. Stops the norns blanking its screen after 15 minutes without a key or knob press |
 | clear song cache | Deletes the song library's cached data (cue points are kept) |
 
 **One General MIDI module (the default):** plug your GM module into the norns and set deck A's midi device to it. Deck B plays to the same device automatically.
@@ -183,7 +186,7 @@ For MIDI outputs, Midarto sets each channel's volume (CC7) from the file's own v
 - [sixolet](https://github.com/sixolet) for [nb](https://github.com/sixolet/nb) (nota bene), which Midarto can play through.
 - [sonoCircuit](https://github.com/sonocircuit) for [midiplayer](https://norns.community/midiplayer/), which showed MIDI file playback on norns and inspired Midarto.
 - [adamstaff](https://github.com/adamstaff) for [turntable](https://norns.community/turntable), whose norns DJ controls inspired Midarto's keys and knobs.
-- denki oto for the norns Shield XL and the grid clone that Midarto was developed and tested on.
+- [denki oto](https://github.com/okyeron) for the norns Shield XL and the grid clone that Midarto was developed and tested on.
 
 The guide uses IBM Plex Mono and the mockup images use Silkscreen, both under the SIL Open Font License.
 
