@@ -1,6 +1,6 @@
 -- midarto
 -- two-deck MIDI file DJ
--- v2.13
+-- v2.14
 --
 -- E1 crossfader
 -- E2/E3 deck A/B volume
@@ -16,6 +16,9 @@
 -- see README for the map
 
 local Deck = include("lib/deck")
+local smf = include("lib/smf")
+local Wave = include("lib/wave")
+local Library = include("lib/library")
 local DJ_ART = include("lib/splash_art")
 
 local has_nb, nb = pcall(require, "nb/lib/nb")
@@ -24,6 +27,10 @@ if not has_nb then nb = nil end
 local DATA_DIR = _path.data .. "midarto/"
 local SONGS_DIR = DATA_DIR .. "songs/"          -- the browser opens here
 local SETTINGS = DATA_DIR .. "settings.pset" -- remembered between sessions
+local LIB_DIR = DATA_DIR .. "library/"          -- cue points and song cache
+-- bump when a new version needs to adjust saved settings (see migrate)
+local SETTINGS_VERSION = 2
+local autosave -- defined with the settings code below
 local LOOPS = { 1, 2, 4, 8, 16 }
 
 local mdev = {}
@@ -309,26 +316,56 @@ local function load_into(id, path)
   local d = decks[id]
   d.playing = false
   d.pending = nil
+  d.armed = nil
   d:stop_notes()
   d.loading = true
   d.name = "LOADING"
   clock.run(function()
-    local ok, err = d:load(path, function() clock.sleep(0.001) end)
+    local y = function() clock.sleep(0.001) end
+    local f = io.open(path, "rb")
+    local data = f and f:read("*a")
+    if f then f:close() end
+    local ok, err, song, wave = false, "can't open file", nil, nil
+    if data then
+      -- the song library: a cached copy loads much faster than the MIDI file
+      local fp = Library.fingerprint(data, y)
+      song, wave = Library.load_cache(path, fp, y)
+      if not song then
+        song, err = smf.parse(data, y)
+        if song then
+          wave = Wave.build(song, y)
+          Library.save_cache(path, fp, song, wave, y)
+        end
+      end
+      data = nil
+      if song then ok, err = d:set_song(song, path, y) end
+    end
     d.loading = false
     if ok then
+      d.wave = wave
+      d.wmix = Wave.mix(wave, function(ch) return not d:muted(ch) end, y)
+      d.wmix_version = d.mute_version
       d.quantize = params:string("midarto_quantize") == "on"
       d:chase(true)   -- work out the song's starting setup
       route_update()  -- decide who owns each channel
+      -- cue points and loop length remembered from last time
+      local saved = Library.load_cues(path)
+      if saved then
+        for i = 1, 4 do
+          local c = saved.cues[i]
+          if c and c < song.len then d.cues[i] = c end
+        end
+        d.last_loop = saved.loop or 0
+      end
       local fc = params:string("midarto_firstcue")
-      if fc ~= "off" then
-        -- skip any silence at the start: cue 1 and the deck go to the
-        -- start of the bar where the music begins
+      if not d.cues[1] and fc ~= "off" then
+        -- skip any silence at the start: cue 1 goes to the start of the
+        -- bar where the music begins
         local sec = d:first_bar_sec(fc == "first drum" and "drum" or "note")
         if sec > 0 then d.cues[1] = sec end
-        d:seek(sec, true)
-      else
-        d:chase()     -- then set up the channels this deck owns
       end
+      if d.cues[1] then d:seek(d.cues[1], true) else d:chase() end
+      d.lib_dirty = false
       notify(id:upper() .. " < " .. d.name)
     else
       d:clear()
@@ -454,9 +491,9 @@ local function deck_key(d, id, c, y, z)
     local b = d:beat_at_sec(d.song.len * (v - 1) / 6)
     d:jump(d:sec_at_beat(math.floor(b / bb) * bb), fk)
   elseif kind == "hot" then
-    if shift then d.cues[v] = nil
+    if shift then d.cues[v] = nil; d.lib_dirty = true
     elseif d.cues[v] then d:jump(d.cues[v], fk)
-    else d.cues[v] = d:bar_start_sec(0) end
+    else d.cues[v] = d:bar_start_sec(0); d.lib_dirty = true end
     flash(fk)
   elseif kind == "bar" then
     d:jump(d:bar_start_sec(v), fk)
@@ -617,10 +654,10 @@ local SCROLL_HOLD, SCROLL_STEP = 24, 4 -- frames (15 fps)
 local function scroll_name(d, w)
   local name = d.name
   local sc = d.scroll
-  if not sc or sc.name ~= name then
+  if not sc or sc.name ~= name or sc.w ~= w then
     local last = 1
     while last < #name and screen.text_extents(name:sub(last)) > w do last = last + 1 end
-    sc = { name = name, last = last, start = frame }
+    sc = { name = name, last = last, start = frame, w = w }
     d.scroll = sc
   end
   if sc.last == 1 then return name end
@@ -898,6 +935,233 @@ local function draw_splash()
   end
 end
 
+-- ---------- waveform view ----------
+
+local ZOOMS = { 2, 4, 8, 16, 32 } -- seconds across the screen
+local HEAD = 40                    -- fixed playhead column
+
+-- collect rectangles by grey level and fill each level once: far fewer
+-- screen calls than setting the level and filling every rectangle
+local batch = {}
+local function brect(l, x, y, w, h)
+  if l <= 0 or w <= 0 or h <= 0 then return end
+  local b = batch[l]
+  if not b then b = {}; batch[l] = b end
+  b[#b + 1] = x; b[#b + 1] = y; b[#b + 1] = w; b[#b + 1] = h
+end
+local function bflush()
+  for l = 1, 15 do
+    local b = batch[l]
+    if b and #b > 0 then
+      screen.level(l)
+      for i = 1, #b, 4 do screen.rect(b[i], b[i + 1], b[i + 2], b[i + 3]) end
+      screen.fill()
+      batch[l] = {}
+    end
+  end
+end
+
+local function fmt_tempo_exact(t)
+  if math.abs(t) < 0.05 then return "0%" end
+  return string.format("%+.1f%%", t)
+end
+
+local function draw_wave_deck(d, id, top)
+  local song = d.song
+  local warn_secs = WARN_SECS[params:get("midarto_warn")] or 0
+  local rem = song and (song.len - d.pos) / d:rate() or 0
+  local warn = song and d.playing and not d.loop and warn_secs > 0 and rem <= warn_secs
+  local fast = rem <= 10
+  local blink = warn and (frame % (fast and 4 or 8) < (fast and 2 or 4))
+  local is_master = (master == id)
+  -- header: deck letter (bar under it on the master deck), play state,
+  -- scrolling name, bpm (tempo change for a second), sync, time left
+  screen.level(blink and 0 or (is_master and 15 or 7))
+  screen.move(1, top + 6)
+  screen.text(id:upper())
+  if is_master then screen.level(15); screen.rect(0, top + 7, 5, 1); screen.fill() end
+  screen.level(15)
+  if d.playing or (d.armed and frame % 4 < 2) then
+    screen.move(7, top + 1); screen.line(7, top + 6); screen.line(10, top + 3.5); screen.close(); screen.fill()
+  elseif not d.armed and song then
+    screen.rect(7, top + 1, 1, 5); screen.fill()
+    screen.rect(9, top + 1, 1, 5); screen.fill()
+  end
+  screen.level(song and 12 or 4)
+  screen.move(12, top + 6)
+  screen.text(scroll_name(d, 48))
+  if not song then return end
+  local bpm_txt = string.format("%.1f", d:bpm())
+  if d.tempo_msg_until and util.time() < d.tempo_msg_until then bpm_txt = fmt_tempo_exact(d.tempo) end
+  screen.level(15); screen.move(93, top + 6); screen.text_right(bpm_txt)
+  if d.sync then
+    screen.level(frame % 16 < 8 and 15 or 8); screen.move(100, top + 6); screen.text_right("S")
+  end
+  screen.level(warn and 15 or 7); screen.move(127, top + 6); screen.text_right(fmt_time(rem))
+
+  local len = song.len
+  local wm = d.wmix
+  -- overview strip: the whole song, loop, cues and where you are
+  if wm then
+    local x = 1
+    while x <= 120 do
+      local v = wm.ov[x]
+      local run = 1
+      while x + run <= 120 and wm.ov[x + run] == v do run = run + 1 end
+      if v > 0 then brect(v, 5 + x, top + 7, run, 1) end
+      x = x + run
+    end
+  end
+  local function ovx(sec) return 6 + math.floor(sec / len * 119 + 0.5) end
+  if d.loop then
+    local x0, x1 = ovx(d.loop.start), ovx(d.loop.stop)
+    brect(7, x0, top + 7, math.max(1, x1 - x0), 1)
+  end
+  for i = 1, 4 do
+    if d.cues[i] then brect(12, ovx(d.cues[i]), top + 7, 1, 1) end
+  end
+  local px = ovx(d.pos)
+  bflush() -- the overview so far, then clear around the position marker
+  screen.level(0); screen.rect(px - 1, top + 7, 3, 1); screen.fill()
+  brect(15, px, top + 7, 1, 1)
+  if d.pending and frame % 4 < 2 then
+    brect(15, ovx(d.pending.target), top + 7, 1, 1)
+  end
+
+  -- the scrolling waveform: one band. height = how busy the music you can
+  -- hear is, kicks and snares punch out bright; upcoming music a touch
+  -- dimmer; the end-warning stretch darker. neighbouring columns that
+  -- look the same are drawn as one block to keep the cpu load low.
+  local spp = ZOOMS[params:get("midarto_zoom")] / 128
+  local mid = top + 17
+  if wm then
+    local step = Wave.STEP
+    local k = math.max(1, math.floor(spp / step + 0.5))
+    local end_start = (warn_secs > 0) and (len - warn_secs) or math.huge
+    local act, hit, n = wm.act, wm.hit, wm.n
+    local rx, rh, rl = 0, 0, 0
+    for x = 0, 126 do
+      local h, l = 0, 0
+      if x < 126 then
+        local s0 = d.pos + (x - HEAD) * spp
+        if s0 >= 0 and s0 < len then
+          local i0 = math.floor(s0 / step) + 1
+          local a, hm = 0, 0
+          for i = i0, math.min(i0 + k - 1, n) do
+            local v = act[i]
+            if v > a then a = v end
+            local hv = hit[i]
+            if hv > hm then hm = hv end
+          end
+          if a > 0 or hm > 0 then
+            local r = math.min(1, a / 200)
+            h = 3 + math.floor(10 * math.sqrt(r) + 0.5)
+            if hm == 2 then h = h + 4 elseif hm == 1 then h = h + 2 end
+            if h > 17 then h = 17 end
+            if h % 2 == 0 then h = h + 1 end
+            l = 4 + math.floor(3 * r + 0.5)
+            if hm == 2 then l = 15 elseif hm == 1 then l = 11 end
+            if x > HEAD and hm == 0 then l = math.max(1, math.floor(l * 0.8 + 0.5)) end
+            if s0 >= end_start then l = math.max(1, math.floor(l * 0.55 + 0.5)) end
+          end
+        end
+      end
+      if h ~= rh or l ~= rl then
+        if rh > 0 and rl > 0 then
+          brect(rl, rx, mid - rh // 2, x - rx, rh)
+        end
+        rx, rh, rl = x, h, l
+      end
+    end
+  end
+  local function wx(sec) return math.floor(HEAD + (sec - d.pos) / spp + 0.5) end
+  -- hot cues in the window
+  for i = 1, 4 do
+    local c = d.cues[i]
+    if c then
+      local x = wx(c)
+      if x >= 0 and x <= 125 then
+        brect(9, x, top + 9, 1, 17)
+        brect(15, x - 1, top + 9, 3, 1)
+      end
+    end
+  end
+  -- where a pending jump will happen (the next bar line)
+  if d.pending then
+    local x = wx(d:sec_at_beat(d.pending.at))
+    if x >= 0 and x <= 125 then
+      local pl = frame % 4 < 2 and 15 or 8
+      for y = top + 9, top + 25, 2 do brect(pl, x, y, 1, 1) end
+    end
+  end
+  -- beat ruler: phrases (every 8 bars), bars, beats, half and quarter beats
+  local left, right = d.pos - HEAD * spp, d.pos + (126 - HEAD) * spp
+  local b0 = d:beat_at_sec(math.max(0, left))
+  local b1 = d:beat_at_sec(math.min(right, len))
+  local ppb = (60 / d:native_bpm()) / spp -- pixels per beat
+  local sub = (ppb >= 12) and 4 or ((ppb >= 6) and 2 or 1)
+  local bb = d:bar_beats()
+  local function on_multiple(beat, m)
+    local q = beat / m
+    return math.abs(q - math.floor(q + 0.5)) < 1e-6
+  end
+  for nq = math.ceil(b0 * sub), math.floor(b1 * sub) do
+    local beat = nq / sub
+    local phrase = on_multiple(beat, bb * 8)
+    local bar = phrase or on_multiple(beat, bb)
+    local whole = (nq % sub == 0)
+    if bar or ppb >= 3 then
+      local x = wx(d:sec_at_beat(beat))
+      if x >= 0 and x <= 125 then
+        local hh, lv
+        if phrase then hh, lv = 6, 15
+        elseif bar then hh, lv = 5, 15
+        elseif whole then hh, lv = 3, 11
+        elseif sub == 4 and nq % 2 == 0 then hh, lv = 2, 7
+        else hh, lv = 1, 4 end
+        if phrase then
+          for y = top + 9, top + 25, 3 do brect(5, x, y, 1, 1) end
+        end
+        brect(lv, x, top + 30 - hh, 1, hh)
+      end
+    end
+  end
+  -- playhead
+  brect(15, HEAD, top + 8, 1, 18)
+  -- output level at the right edge
+  brect(1, 126, top + 8, 1, 21)
+  local lv = math.floor(d.meter * 20 + 0.5)
+  if lv > 0 then brect(10, 127, top + 28 - lv, 1, lv) end
+  bflush()
+end
+
+local frame_ms = 0
+
+local function draw_waveform()
+  draw_wave_deck(decks.a, "a", 0)
+  draw_wave_deck(decks.b, "b", 32)
+  -- middle line: beat-phase meter. the marker sits on the centre when
+  -- both decks' beats line up
+  screen.level(1); screen.rect(0, 31, 128, 1); screen.fill()
+  screen.level(6); screen.rect(63, 30, 2, 3); screen.fill()
+  if decks.a.playing and decks.b.playing and decks.a.song and decks.b.song then
+    local pa, pb = decks.a:beat() % 1, decks.b:beat() % 1
+    local off = ((pb - pa + 0.5) % 1) - 0.5
+    screen.level(15); screen.rect(math.floor(63 + off * 80 + 0.5), 31, 2, 1); screen.fill()
+  end
+  -- crossfader along the bottom edge
+  screen.level(2); screen.rect(0, 63, 126, 1); screen.fill()
+  screen.level(15); screen.rect(math.floor(xf * 121 + 0.5), 63, 5, 1); screen.fill()
+  -- short messages (loaded, panic, cache cleared ...)
+  local msg = nil
+  if message and util.time() < message_until then msg = message elseif k1 then msg = "SHIFT" end
+  if msg then
+    screen.level(0); screen.rect(18, 26, 92, 11); screen.fill()
+    screen.level(6); screen.rect(18, 26, 92, 1); screen.fill(); screen.rect(18, 36, 92, 1); screen.fill()
+    screen.level(15); screen.move(64, 34); screen.text_center(trim(msg, 88))
+  end
+end
+
 function redraw()
   screen.clear()
   screen.font_face(1)
@@ -906,12 +1170,17 @@ function redraw()
     draw_splash()
   elseif mode == "browse" then
     draw_browser()
+  elseif params:string("midarto_view") == "waveform" then
+    draw_waveform()
   else
     draw_platter(decks.a, 21, 6, "a")
     draw_platter(decks.b, 106, 9, "b")
     draw_mixer()
     draw_deck_text(decks.a, "a")
     draw_deck_text(decks.b, "b")
+  end
+  if params:string("midarto_frametime") == "on" then
+    screen.level(15); screen.move(127, 62); screen.text_right(string.format("%.1fms", frame_ms))
   end
   screen.update()
 end
@@ -952,13 +1221,45 @@ local function engine()
 end
 
 local function ui_loop()
+  local interval = 1 / 15
+  local avg = 0
   while true do
-    clock.sleep(1 / 15)
+    clock.sleep(interval)
     frame = frame + 1
-    for _, id in ipairs(ids) do decks[id].meter = decks[id].meter * 0.82 end
+    local now = util.time()
+    for _, id in ipairs(ids) do
+      local d = decks[id]
+      d.meter = d.meter * 0.82
+      -- remember cue and loop changes in the song library
+      if d.lib_dirty and d.path then
+        Library.save_cues(d.path, d.cues, d.last_loop)
+        d.lib_dirty = false
+      end
+      -- re-mix the waveform after a mute or solo change, in slices
+      if d.wave and d.wmix_version ~= d.mute_version and not d.mixing then
+        d.mixing = true
+        local w, target = d.wave, d.mute_version
+        clock.run(function()
+          local m = Wave.mix(w, function(ch) return not d:muted(ch) end, function() clock.sleep(0.001) end)
+          if d.wave == w then d.wmix = m; d.wmix_version = target end
+          d.mixing = false
+        end)
+      end
+      -- show a tempo change on screen for a second
+      if d.last_tempo and math.abs(d.tempo - d.last_tempo) > 0.049 and not (d.sync and id ~= master) then
+        d.tempo_msg_until = now + 1
+      end
+      d.last_tempo = d.tempo
+    end
+    if frame % 15 == 0 then autosave(now) end
     redraw()
     grid_redraw()
     decks.a.act, decks.b.act = {}, {}
+    -- if drawing ever gets slow, draw less often so notes stay on time
+    local took = util.time() - now
+    avg = avg * 0.9 + took * 0.1
+    frame_ms = avg * 1000
+    interval = (avg > 0.008) and (1 / 10) or (1 / 15)
   end
 end
 
@@ -1012,6 +1313,18 @@ local function add_params()
   params:add_option("midarto_firstcue", "cue to first note", { "off", "first note", "first drum" }, 2)
   params:add_option("midarto_barstart", "start on bar", { "off", "on", "on + sync" }, 3)
   params:add_option("midarto_quantize", "quantize jumps", { "on", "off" }, 1)
+  params:add_separator("midarto_screen", "screen")
+  params:add_option("midarto_view", "screen view", { "platters", "waveform" }, 1)
+  params:add_option("midarto_zoom", "waveform zoom", { "2 s", "4 s", "8 s", "16 s", "32 s" }, 2)
+  params:add_option("midarto_frametime", "show frame time", { "off", "on" }, 1)
+  params:add_number("midarto_settings_ver", "settings version", 0, 99, 1)
+  pcall(function() params:hide("midarto_settings_ver") end)
+  params:add_separator("midarto_lib", "song library")
+  params:add_trigger("midarto_clearcache", "clear song cache")
+  params:set_action("midarto_clearcache", function()
+    local n = Library.clear_cache()
+    notify("cache cleared (" .. n .. ")")
+  end)
   params:set_action("midarto_quantize", function(v)
     for _, id in ipairs(ids) do decks[id].quantize = (v == 1) end
   end)
@@ -1021,6 +1334,50 @@ local function add_params()
   params:add_trigger("midarto_panic", "panic: all notes off")
   params:set_action("midarto_panic", panic)
   if has_nb then nb:add_player_params() end
+end
+
+-- adjust settings saved by older versions. runs once after updating.
+local function migrate(from)
+  local changed = {}
+  if from < 2 then
+    -- 2.8 made one GM device the default with deck B shifted by 8;
+    -- older saved settings kept deck B on shift 0, which clashes
+    if params:string("midarto_outputs") == "one device" and params:get("midarto_shift_b") == 0 then
+      params:set("midarto_shift_b", 8)
+      changed[#changed + 1] = "B shift 8"
+    end
+  end
+  params:set("midarto_settings_ver", SETTINGS_VERSION)
+  return changed
+end
+
+-- save settings a moment after they change, so nothing is lost if the
+-- norns loses power mid-set (they're also saved when you leave)
+local saved_sig = nil
+local changed_at = nil
+local function settings_sig()
+  local t = {}
+  for _, p in ipairs(params.params or {}) do
+    if p.id and p.t ~= params.tTRIGGER and p.get then
+      local ok, v = pcall(function() return p:get() end)
+      if ok and type(v) ~= "table" then t[#t + 1] = tostring(v) end
+    end
+  end
+  return table.concat(t, ",")
+end
+function autosave(now)
+  local sig = settings_sig()
+  if saved_sig == nil then saved_sig = sig; return end
+  if sig ~= saved_sig then
+    if not changed_at then changed_at = now end
+    if now - changed_at >= 2 then
+      params:write(SETTINGS, "midarto")
+      saved_sig = sig
+      changed_at = nil
+    end
+  else
+    changed_at = nil
+  end
 end
 
 local function is_song(e) return e:lower():match("%.midi?$") ~= nil end
@@ -1050,8 +1407,22 @@ function init()
   decks.b = Deck.new("b", make_out("b"))
   add_params()
   seed_data()
-  if util.file_exists(SETTINGS) then params:read(SETTINGS, true) end
+  Library.init(LIB_DIR)
+  local had_settings = util.file_exists(SETTINGS)
+  if had_settings then params:read(SETTINGS, true) end
   params:bang()
+  if not had_settings then
+    params:set("midarto_settings_ver", SETTINGS_VERSION)
+  elseif params:get("midarto_settings_ver") < SETTINGS_VERSION then
+    local changed = migrate(params:get("midarto_settings_ver"))
+    params:write(SETTINGS, "midarto")
+    if #changed > 0 then
+      clock.run(function()
+        clock.sleep(SPLASH_SECS + 0.2)
+        notify(table.concat(changed, ", "))
+      end)
+    end
+  end
   g.key = grid_key
   splash_start = util.time()
   splash_until = splash_start + SPLASH_SECS

@@ -2,9 +2,11 @@
 
 ![Midarto on norns and grid](https://raw.githubusercontent.com/mrglennjones/midarto/main/docs/images/mockup.gif)
 
+![Waveform view](https://raw.githubusercontent.com/mrglennjones/midarto/main/docs/images/waveform.gif)
+
 A two-deck MIDI file DJ for monome norns. Load `.mid` files into deck A and deck B, mix them with a crossfader and play them out to a MIDI sound module (such as a General MIDI module) or to nb voices. It works on the norns alone, and a 16×8 grid adds cues, loops, mutes, sync and big transport keys.
 
-Version 2.13.
+Version 2.14.
 
 ## Install
 
@@ -32,7 +34,7 @@ To play a deck through nb voices instead of MIDI, install the nb library (`dust/
 
 ## First setup
 
-Open PARAMS > EDIT > MIDARTO. Midarto remembers these settings between sessions (in `dust/data/midarto/settings.pset`).
+Open PARAMS > EDIT > MIDARTO. Midarto saves these settings a couple of seconds after you change them (in `dust/data/midarto/settings.pset`), so they survive a power cut, and keeps them when you update to a new version. If an update needs to adjust an old setting, it does so once and shows what it changed.
 
 | Parameter | What it does |
 |---|---|
@@ -47,9 +49,13 @@ Open PARAMS > EDIT > MIDARTO. Midarto remembers these settings between sessions 
 | start on bar | `on + sync` (default), `on` or `off`. PLAY on a stopped deck waits for the other deck's next bar line while it plays; `on + sync` also locks the tempo |
 | quantize jumps | Seek, cue and bar jumps wait for the next bar line |
 | knob sensitivity | How far the faders move per encoder step |
-| end warning | How long before the end of a song its platter outline starts flashing: off, 10, 20, 30 (default) or 60 seconds |
+| end warning | How long before the end of a song it warns you (platter outline or waveform header flashes): off, 10, 20, 30 (default) or 60 seconds |
 | clock follows master | Sets the norns clock tempo from the master deck, so clocked gear follows |
 | panic | All notes off on both decks' outputs |
+| screen view | `platters` (default) or `waveform` |
+| waveform zoom | How much time the waveform shows across the screen: 2, 4 (default), 8, 16 or 32 seconds |
+| show frame time | Shows how long each screen frame takes to draw, for checking the load on your norns |
+| clear song cache | Deletes the song library's cached data (cue points are kept) |
 
 **One General MIDI module (the default):** plug your GM module into the norns and set deck A's midi device to it. Deck B plays to the same device automatically.
 
@@ -63,7 +69,30 @@ General MIDI has only 16 channels, so deck B's channel shift (8 by default) move
 4. Set deck A's midi device to the first module and deck B's to the second. The device names show next to the numbers.
 5. Set deck B's channel shift to 0.
 
-**Upgrading from v2.3–v2.7:** your saved settings keep deck B's old channel shift (0). For one device, set deck B's channel shift to 8.
+**Upgrading from v2.3–v2.7:** from 2.14 on, Midarto fixes deck B's old channel shift (0) for you on the first run and shows "B shift 8".
+
+## Waveform view
+
+Set **screen view** to `waveform` in PARAMS. Each deck gets half the screen (A on top, B below):
+
+- **Header:** deck letter (bright with a bar under it on the master deck), play/pause (blinking while armed for start on bar), the scrolling song name, BPM (shows the tempo change for a second when you change it), a blinking `S` when synced, and time remaining.
+- **Overview strip:** a thin line showing the whole song, with the loop, hot cues and your position. A pending jump's target blinks.
+- **Waveform:** the song's MIDI activity scrolling past a fixed playhead. Height shows how busy the music you can hear is; **kicks** punch out as tall bright spikes and **snares/claps** as shorter light-grey ones (songs without drums use bass-note starts). Upcoming music is slightly dimmer, and the end-warning stretch is darker. Muted or solo-silenced channels disappear from it.
+- **Markers:** hot cues as lines, a dashed line where a pending jump will land, and a beat ruler (phrases every 8 bars, bars, beats, half and quarter beats).
+- **Right edge:** each deck's output level.
+- **Middle line:** a beat-phase meter. The marker sits on the centre mark when both decks' beats line up.
+- **Bottom edge:** the crossfader.
+
+The waveform is a picture of the MIDI notes, not the sound from your GM module, but it shows beats, drops and breakdowns clearly. It's worked out when a song loads and saved in the song library.
+
+## Song library
+
+Midarto keeps a small library in `dust/data/midarto/library/`:
+
+- **Cue points:** hot cues 1–4 and the last loop length for each song are remembered and come back when you load the song again.
+- **Cache:** the prepared song and its waveform, so loading a song the second time is much quicker. If you edit or replace a MIDI file, Midarto notices and rebuilds it, keeping your cue points if they still fit the song.
+
+Everything in the library is safe to delete. **clear song cache** in PARAMS removes the cached data but keeps your cue points.
 
 ## Norns controls
 

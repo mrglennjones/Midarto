@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.14
+- Waveform view (screen view setting): both decks' MIDI activity scrolls past a fixed playhead, with kicks and snares standing out, a song overview with loop, cues and position, hot cue and pending-jump markers, a beat ruler with phrase markers, a beat-phase meter, the crossfader, output levels, and mutes shown in the waveform. Zoom from 2 to 32 seconds in PARAMS.
+- Song library: hot cues and the last loop length are remembered per song, and each song's prepared data and waveform are cached so it loads much faster the second time. "clear song cache" in PARAMS.
+- Screen drawing is batched and slows its frame rate automatically if it ever gets too busy, so notes stay on time. "show frame time" in PARAMS.
+- Settings are saved a couple of seconds after any change (not only when leaving the script), and kept across updates. A settings version lets updates adjust old saved settings once, with a message saying what changed (deck B's channel shift 0 becomes 8 for one-device setups).
+
 ## 2.13
 - Cue to first note (on by default): loading a song sets hot cue 1 and the deck to the start of the bar where the music begins, skipping silence at the start. Can use the first drum hit instead, or be turned off.
 - Start on bar (on + sync by default): PLAY on a stopped deck while the other deck plays arms it; it starts exactly on the other deck's next bar line and syncs its tempo. PLAY again cancels.
